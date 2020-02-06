@@ -7,6 +7,7 @@ use Tie::File;
 my $lplfile = "";
 my $system = "";
 my $substringh = "-h";
+my $substringr = "-r";
 #my $substringr = "-r";
 my $remove = "FALSE";
 my @lineslpl = "";
@@ -18,23 +19,30 @@ my @lineslplcrc32 = "";
 #check command line
 foreach my $argument (@ARGV) {
   if ($argument =~ /$substringh/) {
-    print "m3umap v0.5 -   Generate m3u files for mulit-disc games in the game directory,\n";
+    print "m3umap v0.6 -   Generate m3u files for mulit-disc games in the game directory,\n";
 	print "                and create a new playlist file\n";
 	print "\n";
-	print "       with m3umap [lpl file ...] [system]\n";
+	print "       with m3umap [options] [lpl file ...] [system]\n";
+    print "\n";
+	print "\n";
+	print "Options:\n";
+	print "  -r    Removes individual disc entries, replaced by a single (Multi-disc)\n";
     print "\n";
 	print "Example:\n";
-	print '              m3umap "D:/RetroArch/playlists/Atari - 2600.lpl" "Atari - 2600"' . "\n";
+	print '              m3umap -r "D:/RetroArch/playlists/Atari - 2600.lpl" "Atari - 2600"' . "\n";
 	print "\n";
 	print "Author:\n";
 	print "   Discord - Romeo#3620\n";
 	print "\n";
     exit;
   }
+   if ($argument =~ /\Q$substringr\E/) {
+    $remove = "TRUE";
+  }
 }
 
 #set paths and system variables
-if (scalar(@ARGV) < 2 or scalar(@ARGV) > 2) {
+if (scalar(@ARGV) < 2 or scalar(@ARGV) > 3) {
   print "Invalid command line.. exit\n";
   print "use: m3umap -h\n";
   print "\n";
@@ -52,13 +60,16 @@ if ($lplfile eq "" or $system eq "") {
 }
 
 #debug
-print "lpl file: $lplfile\n";
+print "read lpl file: $lplfile\n";
+print "new lpl file: new_$system.lpl\n";
 print "system: $system\n";
+print "remove entries: $remove\n";
 
 #read playlist file
 open(FILE, "<", $lplfile) or die "Could not open $lplfile\n";
 while (my $readline = <FILE>) {
   push(@lineslpl, $readline);
+  #print "$readline\n";
 }
 close (FILE);
 
@@ -77,7 +88,8 @@ my $lplcrc = "";
 #parse the extension, game name and crc32 from playlist
 foreach my $lplline (@lineslpl) {
   if ($lplline =~ m/"path": /) {
-    #parse extension name and path
+    $lplline =~ s/\\\\/\//g; 
+	#parse extension name and path
 	$resultgameend = index($lplline, '",');
 	if ($lplline =~ m/[#]/) {
 	  $extname = ".zip";
@@ -88,7 +100,8 @@ foreach my $lplline (@lineslpl) {
 	$resultgameend = rindex($lplline, '/');
 	my $length = ($resultgameend)  - ($resultgamestart + 9) ;
 	my $path = substr($lplline, $resultgamestart + 9, $length + 1);
-    push(@lineslplext, $extname);
+    #print "$extname " . "$path\n";
+	push(@lineslplext, $extname);
 	push(@lineslplpath, $path);
   }
   if ($lplline =~ m/"label": "/) {
@@ -120,7 +133,7 @@ my @gamesdone = "";
 my @gamesdonepath = "";
 
 my $max = scalar(@lineslplgame);
-my $progress = Term::ProgressBar->new({name => 'progress', count => $max});
+my $progress = Term::ProgressBar->new({name => 'progress find muti-disc', count => $max});
 
 #write similar names to an array
 open(LOG, ">", "log_" . "$system" . ".txt") or die "Could not open log.txt\n";
@@ -178,6 +191,7 @@ OUTER: foreach my $checklpl (@lineslplgame) {
      $countpath++;
      my $compare = substr($element, -4);
 	 if ($compare ne "") {
+	   #print "$element:  " . "$linessimilargamepath[$countpath]\n";
 	   push (@gamesdone, $element);
 	   push (@gamesdonepath, $linessimilargamepath[$countpath]);
 	 }
@@ -221,11 +235,21 @@ $gdcount = -1;
 my $newopenout = "";
 my $openout = "";
 my $tempele = "";
+my $max5 = 0;
+
+#init counter
+open(INFILE, '<', $lplfile) or die "Could not open file '$lplfile' $!";
+while (<INFILE>) {
+  $max5++;
+}
+close INFILE;
+my $progress5 = Term::ProgressBar->new({name => 'progress write m3us', count => $max5});
 
 #write m3u map to files and create new playlist with m3u entities
 open(INFILE, '<', $lplfile) or die "Could not open file '$lplfile' $!";
 open(NEWFILE, '>', "new_$system.lpl") or die "Could not open file 'new_$system.lpl' $!";
 while (my $line = <INFILE>){
+  $progress5->update($_);
   print NEWFILE $line;
   if($line =~ m/"items": /) {
     foreach my $elementout (@filenames) {
@@ -253,7 +277,7 @@ while (my $line = <INFILE>){
       
         my $path = '      "path": ' . '"' . "$openout" . '",';
         my $name = $elementout;
-        my $label = '      "label": "' . "$name" . ' (m3u)"' . ',';
+        my $label = '      "label": "' . "$name" . ' (Multi-disc)"' . ',';
         my $core_path = '      "core_path": "DETECT",';
         my $core_name = '      "core_name": "DETECT",';
         my $crc32 = '      "crc32": "' . "00000000" . '|crc"' . ',';
@@ -273,8 +297,49 @@ while (my $line = <INFILE>){
 }
 close INFILE;
 close NEWFILE;
+
+my @lplarray = "";
+my $lpllinepos = 0;
+my $newlplname = "new_$system.lpl";
+if ($remove eq "TRUE") {
+
+  my $max2 = scalar(@gamesdone);
+  my $progress2 = Term::ProgressBar->new({name => 'progress remove playlist entries', count => $max2});
+
+LPLOUTER:  foreach my $element2 (@gamesdone) {
+    $progress2->update($_);
+    my $element3 = substr $element2, 0, length($element2) - 4;
+    #print "$element3\n";
+    $lpllinepos = 0;
+    tie @lplarray, 'Tie::File', $newlplname;
+    foreach my $elementarray (@lplarray)  {
+      $lpllinepos++;
+	  #parse game name
+	  if ($elementarray =~ m/"label": "/) {
+      
+        #parse game name
+	    $resultgamestart = index($elementarray, '"label": "');
+	    $resultgameend = index($elementarray, '",');
+	    my $length2 = ($resultgameend)  - ($resultgamestart + 10) ;
+        $gamename  = substr($elementarray, $resultgamestart + 10, $length2);	
+	    #print "$gamename: " . "$element3:" . " count: $lpllinepos\n";
+	  
+        if ($gamename eq $element3) {
+          #print "match:  $element3" . " : " . "$gamename" . "at: $lpllinepos\n";
+          #remove the matched entry from new playlist
+          print LOG "Removing entry: $gamename from $newlplname\n";
+          splice(@lplarray,$lpllinepos -2, 8);
+		  untie @lplarray;
+		  next LPLOUTER;
+        }
+	  }
+    }
+    untie @lplarray;
+  }
+}
+
 close LOG;
 
-my $newlplname = "new_$system.lpl";
+
 print "\nnew playlist file: $newlplname\n";
 print "log file: log_" . "$system" . ".txt\n";
